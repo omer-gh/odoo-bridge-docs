@@ -90,9 +90,10 @@ cp .env.example .env
 Fill in:
 
 - `ODOO_URL`, `ODOO_DB`, `ODOO_USERNAME`, `ODOO_API_KEY` — from step 1
-- `DASHBOARD_PASSPHRASE` — a passphrase of your choosing; the dashboard
-  refuses to start without one
 - `DASHBOARD_SECRET_KEY` — generate one: `python3 -c "import secrets; print(secrets.token_hex(32))"`
+
+You don't need to set a dashboard passphrase here — the first time you
+open the dashboard, it walks you through choosing one (see Part A).
 
 Leave `ODOO_ALLOW_WRITE=0` and `ODOO_ALLOW_DELETE=0` until you're ready to
 go beyond read-only (see Part A).
@@ -139,9 +140,32 @@ docker compose ps               # check status
 docker compose down             # stop (keeps stored data)
 ```
 
+### First visit: setting a passphrase
+
+The first time you open the dashboard, there's no passphrase set yet — it
+walks you straight to a setup screen instead of a login form. Choose a
+passphrase (minimum 8 characters), confirm it, and you're logged in
+immediately. From then on, that screen won't appear again; opening the
+dashboard shows the normal login form.
+
+There's no email or 2FA recovery if you lose it — see "Forgot passphrase"
+below for what losing it actually costs you.
+
+**Changing it later:** while logged in, use **Change passphrase** in the
+header nav — it only asks for the new passphrase (your session already
+proves who you are, so it doesn't re-ask for the current one).
+
+**Forgot passphrase:** the login page has a "Forgot passphrase?" link.
+There is no reset-by-email here, so the only way back in is destructive —
+it deletes every bridge client, its key, and its permission matrix,
+permanently, then returns you to the first-visit setup screen to choose a
+new one. It requires typing a literal confirmation phrase (shown on the
+page) to proceed, and the reset itself is recorded in the audit log even
+though everything else is wiped.
+
 ### Managing bridge clients (dashboard)
 
-1. Open the dashboard, enter your passphrase.
+1. Log in with your passphrase.
 2. **+ New client** → name it, add one matrix row per model with
    independent read / create / write / delete checkboxes, submit. Each
    row's model can be an exact model (`crm.lead`), a prefix wildcard
@@ -181,31 +205,37 @@ export/grep if you need more than the dashboard shows.
 ### Backup / recovery
 
 The only state that isn't reproducible from a fresh install is the stored
-database of clients/keys/matrix and the audit log. Back up that volume
-regularly — losing it means recreating every client and losing the audit
-trail. Also back up `.env` separately (your Odoo API key, dashboard
-passphrase, secret key) — nothing else has a copy of it.
+database (clients/keys/matrix **and** the dashboard passphrase itself —
+both live in the same file) and the audit log. Back up that volume
+regularly — losing it means recreating every client, choosing a new
+passphrase, and losing the audit trail, all at once. Also back up `.env`
+separately (your Odoo API key, session-signing secret key) — nothing else
+has a copy of it.
 
 ### Troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|
-| Dashboard won't start | `DASHBOARD_PASSPHRASE` is unset in `.env` — it refuses to start unlocked, by design |
+| Dashboard shows the setup screen again unexpectedly | Someone used "Forgot passphrase" — that wipes all clients/keys/matrix as well, by design. Check the audit log for a `dashboard_reset` entry to see when/from where |
 | Model autocomplete empty on "New client" page | The dashboard couldn't reach Odoo the last time it tried (cached for a while). Test connectivity directly against your Odoo instance's database-list endpoint — if that hangs or is refused, it's an Odoo/network reachability issue, not a bridge bug |
 | A client gets `401` | Missing/wrong key, or the client was disabled/deleted/rotated in the dashboard |
 | A client gets `403` on a call you expect to work | Check its matrix on the client's dashboard page first; if that looks right, check the relevant master switch in `.env` |
 | Bridge server can't reach Odoo (`502`) | Same reachability check as the autocomplete issue above |
 
-### Rotating dashboard credentials
+### Changing or resetting the dashboard passphrase
 
-```bash
-python3 -c "import secrets; print(secrets.token_urlsafe(18))"   # new passphrase
-python3 -c "import secrets; print(secrets.token_hex(32))"       # new secret key
-```
-
-Edit `DASHBOARD_PASSPHRASE` / `DASHBOARD_SECRET_KEY` in `.env`, then
-restart to apply. Rotating the secret key also invalidates any existing
-dashboard login session.
+- **Know your current passphrase, just want a new one:** log in, use
+  **Change passphrase** in the nav — new passphrase only, no need to
+  re-enter the old one.
+- **Lost it entirely:** the login page's "Forgot passphrase?" link — but
+  read what it actually does above first (it deletes every bridge
+  client/key/matrix, not just the passphrase).
+- **Rotating `DASHBOARD_SECRET_KEY`** (the session-signing secret, separate
+  from the passphrase): generate a new one —
+  `python3 -c "import secrets; print(secrets.token_hex(32))"` — set it in
+  `.env`, restart. This invalidates any existing login session (you'll
+  need to log back in with your passphrase) but does not touch the
+  passphrase or any stored data.
 
 ---
 
