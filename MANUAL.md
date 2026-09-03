@@ -142,9 +142,12 @@ docker compose down             # stop (keeps stored data)
 ### Managing bridge clients (dashboard)
 
 1. Open the dashboard, enter your passphrase.
-2. **+ New client** → name it, add one matrix row per model (or `*` for
-   "everything not listed") with independent read / create / write /
-   delete checkboxes, submit.
+2. **+ New client** → name it, add one matrix row per model with
+   independent read / create / write / delete checkboxes, submit. Each
+   row's model can be an exact model (`crm.lead`), a prefix wildcard
+   (`crm.*` matches `crm.lead`, `crm.team`, …), or `*` for everything not
+   matched by a more specific row. Precedence: exact match wins over the
+   longest matching prefix wildcard, which wins over `*`.
 3. The raw API key is shown **once**, on that screen only — copy it now
    and hand it to whatever script or agent should authenticate as this
    client. It's never shown again; only its hash is stored.
