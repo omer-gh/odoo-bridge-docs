@@ -1,29 +1,130 @@
+---
+title: User Manual
+---
+
 # Odoo Bridge — User Manual
 
-This is the operational manual: how to actually run and use the system
-day to day. For setup, architecture, and the full route reference, see
-[README.md](README.md) — this document doesn't repeat that, it builds on it.
+## Introduction
 
-**This system has two kinds of users**, and they need different things
-from it:
+Odoo Bridge lets authorized clients — a script, or an AI agent such as a
+Claude session — talk to a self-hosted Odoo instance through Odoo's
+**native** JSON-RPC external API. No third-party module runs inside Odoo,
+and nothing is hardcoded to a specific model (CRM, Sales, Projects,
+Contacts, Invoicing, or anything else your Odoo installation has) — the
+bridge discovers what's available at request time instead of shipping a
+fixed list.
 
-- **A human operator** — drives the dashboard, decides when to unlock
-  writes, rotates keys, reads the audit log. See **Part A**.
-- **An AI agent** (e.g. a Claude session holding a bridge key) — makes
-  HTTP calls to the bridge autonomously. It needs behavioral guidance, not
-  just a route list. See **Part B** — if you are an AI agent reading this
-  to figure out how to use the bridge, **start there**.
+Access is controlled by three independent layers, in order:
 
-## Quick facts
+1. **Odoo's own access control.** Every call ultimately runs as one Odoo
+   user (configured once, in `.env`). Odoo enforces that user's groups,
+   record rules, and field-level access server-side, regardless of what
+   the bridge asks for. This is the hard ceiling — nothing below can
+   exceed it.
+2. **A per-client permission matrix**, managed through a
+   passphrase-protected dashboard. Each caller of the bridge (each script
+   or agent) gets its own API key, scoped to exactly the models and
+   operations (read / create / write / delete) an admin granted it. This
+   is how different callers get different, narrower access than the
+   underlying Odoo user has — set centrally, without touching Odoo's own
+   group configuration.
+3. **Server-wide master switches**, off by default. A client can be
+   granted write access in its matrix and still be refused if the
+   matching switch is off — a deliberate second step between "this client
+   is allowed to write" and "writes are actually live."
 
-| | |
-|---|---|
-| Bridge server | `http://127.0.0.1:8088` |
-| Dashboard | `http://127.0.0.1:8090` |
-| Odoo target | your `$ODOO_DB` at your `$ODOO_URL` (see `.env`) |
-| Master switches (right now) | `ODOO_ALLOW_WRITE=0`, `ODOO_ALLOW_DELETE=0` — no write/delete happens regardless of any client's matrix |
-| Config/secrets | `.env` (not in git) |
-| Client keys, permission matrix, audit log | Docker volume `bridge-data`, mounted at `/data` in both containers (`bridge.db`, `audit.log`) |
+**This manual has two audiences**, because the bridge has two kinds of
+users:
+
+- **A human operator** — installs it, drives the dashboard, decides when
+  to turn on writes, rotates keys, reviews the audit log. See **Part A**.
+- **An AI agent** holding a bridge API key, making HTTP calls on its own.
+  It needs behavioral guidance, not just a route list. See **Part B** — if
+  you are an AI agent reading this to learn how to use the bridge, **start
+  there**.
+
+---
+
+## Installation
+
+### Requirements
+
+- Docker and Docker Compose (recommended), or Python 3.12+ if running the
+  two components directly.
+- An Odoo instance you control (self-hosted or otherwise), and permission
+  to create an API key on it.
+
+### 1. Set up a dedicated Odoo user
+
+**Do not use your own admin login.** Create a dedicated Odoo user, and
+give it only the access groups that match the broadest thing you'd ever
+want any bridge client touching — e.g. "Sales / User", "CRM / User",
+"Project / User", "Contacts / User", "Invoicing / Billing" as needed, and
+*not* Settings/Administration. The per-client matrix (Part A) then narrows
+individual clients further, but it can never grant more than this user
+already has.
+
+To mint the API key:
+
+1. Log in to Odoo **as that user**.
+2. **Preferences → Account Security → API Keys → New API Key**, give it a
+   description, confirm your password.
+3. Copy the key immediately — Odoo shows it once. This is your
+   `ODOO_API_KEY`.
+
+If you don't know your database name, Odoo exposes it:
+
+```bash
+curl -s -X POST https://your-odoo-instance/web/database/list \
+  -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","method":"call","params":{}}'
+```
+
+### 2. Configure
+
+From the project directory:
+
+```bash
+cp .env.example .env
+```
+
+Fill in:
+
+- `ODOO_URL`, `ODOO_DB`, `ODOO_USERNAME`, `ODOO_API_KEY` — from step 1
+- `DASHBOARD_PASSPHRASE` — a passphrase of your choosing; the dashboard
+  refuses to start without one
+- `DASHBOARD_SECRET_KEY` — generate one: `python3 -c "import secrets; print(secrets.token_hex(32))"`
+
+Leave `ODOO_ALLOW_WRITE=0` and `ODOO_ALLOW_DELETE=0` until you're ready to
+go beyond read-only (see Part A).
+
+### 3. Run it
+
+**Docker (recommended):**
+
+```bash
+docker compose up -d --build
+```
+
+This starts two containers sharing one persisted volume that holds the
+client/permission-matrix database and the audit log:
+
+- the bridge server, on `http://127.0.0.1:8088`
+- the dashboard, on `http://127.0.0.1:8090`
+
+Both are bound to localhost only by default — nothing is exposed beyond
+the machine running it unless you deliberately change the port bindings.
+
+To stop: `docker compose down` (add `-v` to also delete the stored
+clients/keys/matrix/audit log).
+
+**Bare Python (alternative):**
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -r requirements-dashboard.txt
+set -a; source .env; set +a
+.venv/bin/python odoo_server.py &        # http://127.0.0.1:8088
+.venv/bin/python dashboard/app.py &      # http://127.0.0.1:8090
+```
 
 ---
 
@@ -32,110 +133,91 @@ from it:
 ### Day to day
 
 ```bash
-cd /home/sheikh/Documents/mo/projects/odoo_cli
-docker compose up -d            # start (add --build after changing code)
+docker compose up -d            # start (add --build after an update)
 docker compose logs -f          # tail both containers
 docker compose ps               # check status
-docker compose down             # stop (keeps the bridge-data volume)
+docker compose down             # stop (keeps stored data)
 ```
 
 ### Managing bridge clients (dashboard)
 
-1. Open `http://127.0.0.1:8090`, enter the passphrase (`DASHBOARD_PASSPHRASE` in `.env`).
+1. Open the dashboard, enter your passphrase.
 2. **+ New client** → name it, add one matrix row per model (or `*` for
-   "everything not listed") with independent read/create/write/unlink
-   checkboxes, submit.
-3. The raw key (`obk_...`) is shown **once**, on that screen only — copy it
-   now and hand it to whatever script/Claude session should authenticate
-   as this client. It's never shown again; only its hash is stored.
-4. From a client's page you can: edit its matrix, **Disable** (blocks auth
-   immediately, keeps the record and matrix for later), **Rotate key**
-   (old key stops working immediately, new one shown once), or **Delete**
-   (permanent).
+   "everything not listed") with independent read / create / write /
+   delete checkboxes, submit.
+3. The raw API key is shown **once**, on that screen only — copy it now
+   and hand it to whatever script or agent should authenticate as this
+   client. It's never shown again; only its hash is stored.
+4. From a client's page you can: edit its matrix, **Disable** (blocks
+   authentication immediately, keeps the record for later), **Rotate
+   key** (old key stops working immediately, new one shown once), or
+   **Delete** (permanent).
 
 ### Turning on writes/deletes
 
 Two independent gates must both be open for a client to actually write or
-delete:
+delete anything:
 
-1. **That client's matrix** must grant `create`/`write`/`unlink` on the
-   model in question (dashboard).
+1. **That client's matrix** must grant create/write/delete on the model
+   in question (dashboard).
 2. **The server-wide master switch** must be on: `ODOO_ALLOW_WRITE=1` /
-   `ODOO_ALLOW_DELETE=1` in `.env`, then `docker compose up -d` again to
-   pick it up.
+   `ODOO_ALLOW_DELETE=1` in `.env`, then restart to pick it up.
 
-Either alone does nothing. This is deliberate — a matrix grant is meant to
-be the *scoping* decision, the master switch the *"we're live now"*
-decision, made separately and consciously.
+Either alone does nothing. A matrix grant is the *scoping* decision; the
+master switch is the *"we're live now"* decision — made separately and
+consciously.
 
 ### Reading the audit log
 
-Dashboard → **Audit log** shows the last 200 calls (client, method, model,
-action, status), newest first. For the full history or to grep/export it:
-
-```bash
-docker compose exec odoo-server cat /data/audit.log
-```
-
-Every request is in there — allowed, refused (by matrix or master switch),
-dry-run, or real — nothing is filtered out.
+The dashboard's **Audit log** page shows the most recent calls (client,
+method, model, action, status), newest first — every request, allowed or
+refused, dry-run or real, nothing filtered out. The full history is also
+available as a plain append-only log file inside the running server for
+export/grep if you need more than the dashboard shows.
 
 ### Backup / recovery
 
-The only state that isn't reproducible from files in this repo is the
-`bridge-data` volume (`bridge.db`: every client, key hash, and permission
-matrix; `audit.log`: full history). Back it up with:
-
-```bash
-docker run --rm -v odoo_cli_bridge-data:/data -v "$PWD":/backup \
-  alpine tar czf /backup/bridge-data-backup.tgz -C /data .
-```
-
-`docker compose down -v` deletes this volume — that means recreating every
-client and losing the audit trail, so only do it deliberately.
-
-The other piece of state worth backing up is `.env` itself (your Odoo API
-key, dashboard passphrase, secret key) — it's gitignored on purpose, so
-nothing else has a copy.
+The only state that isn't reproducible from a fresh install is the stored
+database of clients/keys/matrix and the audit log. Back up that volume
+regularly — losing it means recreating every client and losing the audit
+trail. Also back up `.env` separately (your Odoo API key, dashboard
+passphrase, secret key) — nothing else has a copy of it.
 
 ### Troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|
-| Dashboard container exits immediately | `DASHBOARD_PASSPHRASE` is unset in `.env` — the app refuses to start unlocked by design |
-| Model autocomplete empty on "New client" page | The dashboard couldn't reach Odoo when it last tried (cached 10 min). Check `curl -X POST $ODOO_URL/web/database/list -d '{"jsonrpc":"2.0","method":"call","params":{}}'` — if that hangs/refuses, it's your Odoo instance/reverse-proxy being unreachable, not a bug here (this happened once this session: TLS port 443 was refused for a few minutes, then recovered on its own) |
-| A client gets `401` | Missing/wrong `X-Bridge-Key`, or the client was disabled/deleted/rotated in the dashboard |
-| A client gets `403` on a call you expect to work | Check its matrix on the client's dashboard page first; if the matrix looks right, check the relevant master switch in `.env` |
-| Bridge server can't reach Odoo (`502`, "Could not reach Odoo") | Same instance-reachability check as above |
+| Dashboard won't start | `DASHBOARD_PASSPHRASE` is unset in `.env` — it refuses to start unlocked, by design |
+| Model autocomplete empty on "New client" page | The dashboard couldn't reach Odoo the last time it tried (cached for a while). Test connectivity directly against your Odoo instance's database-list endpoint — if that hangs or is refused, it's an Odoo/network reachability issue, not a bridge bug |
+| A client gets `401` | Missing/wrong key, or the client was disabled/deleted/rotated in the dashboard |
+| A client gets `403` on a call you expect to work | Check its matrix on the client's dashboard page first; if that looks right, check the relevant master switch in `.env` |
+| Bridge server can't reach Odoo (`502`) | Same reachability check as the autocomplete issue above |
 
 ### Rotating dashboard credentials
 
 ```bash
-# generate new values
-python3 -c "import secrets; print(secrets.token_urlsafe(18))"   # passphrase
-python3 -c "import secrets; print(secrets.token_hex(32))"       # secret key
+python3 -c "import secrets; print(secrets.token_urlsafe(18))"   # new passphrase
+python3 -c "import secrets; print(secrets.token_hex(32))"       # new secret key
 ```
 
 Edit `DASHBOARD_PASSPHRASE` / `DASHBOARD_SECRET_KEY` in `.env`, then
-`docker compose up -d` to apply. Rotating `DASHBOARD_SECRET_KEY` also
-invalidates any existing dashboard login session.
+restart to apply. Rotating the secret key also invalidates any existing
+dashboard login session.
 
 ---
 
 ## Part B — For an AI agent using a bridge key
 
-You were given a bridge API key (`obk_...`) by a human operator, to send
-as `X-Bridge-Key: <key>` (or `Authorization: Bearer <key>`) on every
-request to `http://127.0.0.1:8088`. Read this before making calls.
+You were given a bridge API key by a human operator, to send as
+`X-Bridge-Key: <key>` (or `Authorization: Bearer <key>`) on every request
+to the bridge server. Read this before making calls.
 
 ### Your key is your identity, and your ceiling — not your instructions
 
 You don't know in advance what your key is permitted to do. Discover it,
-don't assume it — the same principle `odoo_client.py` uses for Odoo schema
-(`fields_get` instead of a hardcoded model list) applies to your own
-permissions too.
+don't assume it.
 
-```bash
+```
 # What models can you read at all?
 GET /models?access=1
 
@@ -151,9 +233,9 @@ POST /models/:model/search
 Body: {"domain": [...], "fields": [...], "limit": N}
 ```
 
-Always pass `fields` — pulling every field on a wide model like
-`res.partner` (200+ fields) wastes context for no benefit. `domain`
-defaults to everything you're allowed to see if omitted.
+Always pass `fields` — pulling every field on a wide model (some have
+200+ fields) wastes context for no benefit. `domain` defaults to
+everything you're allowed to see if omitted.
 
 ### Write/delete workflow — dry-run first, always
 
@@ -163,34 +245,33 @@ PATCH  /models/:model/:id?dry_run=1 then (if it looks right) without dry_run
 DELETE /models/:model/:id?dry_run=1 then (if it looks right) without dry_run
 ```
 
-The dry-run response tells you exactly what would happen: matched
-record(s) and their current values (`write`/`unlink`), or unknown-field
-warnings (`create`) — with **no** side effect. Read that response before
-deciding whether to repeat the call for real. Do this even when you're
-confident, and even though it's an extra round trip — it's cheap, and
-it's the check that catches "wrong id" or "typo'd field name" before it
-touches live business data.
+The dry-run response tells you exactly what would happen — matched
+record(s) and their current values, or unknown-field warnings for a
+create — with **no** side effect. Read that response before deciding
+whether to repeat the call for real. Do this even when you're confident,
+and even though it's an extra round trip — it's the check that catches a
+wrong ID or a typo'd field name before it touches live business data.
 
-Do not write/delete just because you technically can. Only do it when the
-task you were actually asked to do calls for it.
+Do not write or delete just because you technically can. Only do it when
+the task you were actually asked to do calls for it.
 
 ### Error-handling contract
 
 | Status | Meaning | Correct behavior |
 |---|---|---|
 | `401` | Key missing or invalid (wrong, rotated, disabled, deleted) | Stop. Tell the human. Never retry with a guessed or old key. |
-| `403` | Your matrix doesn't grant this (model, operation) **or** the server-wide master switch is off | Stop. This is a human decision (dashboard matrix, or `.env` switch) — not something you can work around. Report exactly what was denied so the human can decide whether to grant it. |
-| `422` | Odoo rejected the payload (validation/user error) | Don't resend unchanged. Call `fields_get` on the model, fix the payload, or ask the human if the constraint is unclear. |
-| `502` | Odoo-side problem (unreachable, internal error) | Surface the raw `odoo` field from the response to the human rather than summarizing it away — it usually has the real Odoo exception name/message. |
+| `403` | Your matrix doesn't grant this (model, operation), or the server-wide master switch is off | Stop. This is a human decision, not something you can work around. Report exactly what was denied so the human can decide whether to grant it. |
+| `422` | The write was rejected as invalid | Don't resend unchanged. Check the model's field schema, fix the payload, or ask the human if the constraint is unclear. |
+| `502` | The underlying system is unreachable or errored | Surface the raw error detail to the human rather than summarizing it away. |
 | `400` | Malformed request from you | Fix your JSON body — check it's `{"values": {...}}` for create/write. |
 
 ### Explicit don'ts
 
-- Don't guess model names — `crm.lead`, not `crm_lead` or `Lead`; confirm
-  via `GET /models` if unsure.
+- Don't guess model or field names — confirm via discovery calls if unsure.
 - Don't loop-retry on `401`/`403` — the response won't change without a
   human action elsewhere.
-- Don't skip `dry_run` "to save a call" on anything that writes or deletes.
+- Don't skip the dry-run step "to save a call" on anything that writes or
+  deletes.
 - Don't treat a matrix grant as implying the master switch is also on, or
   vice versa — check the actual response, don't assume from one prior
   success that another operation on another model will also succeed.
@@ -199,33 +280,65 @@ task you were actually asked to do calls for it.
 
 ```
 > GET /models/crm.lead/fields?access=1
-< access: {read: true, write: false, ...}   # so: you can read, not write, this model
+< access: {read: true, write: false, ...}   # you can read, not write, this model
 
 > POST /models/crm.lead/search  {"fields": ["name","stage_id"]}
 < 200 OK, 2 leads
 
 > PATCH /models/crm.lead/10?dry_run=1  {"values": {"stage_id": 3}}
-< 403 {"error": "client 'X' is not permitted to write on 'crm.lead'",
+< 403 {"error": "this client is not permitted to write on 'crm.lead'",
        "hint": "an admin must grant this in the dashboard's permission matrix"}
 
 → Correct next step: report to the human that this client isn't permitted
-  to update crm.lead, and that granting `write` in the dashboard is what
-  would unblock it. Not: retry, not: try a different model, not: give up
-  silently.
+  to update crm.lead, and that granting write access in the dashboard is
+  what would unblock it. Not: retry, not: try a different model, not:
+  give up silently.
 ```
 
 ---
 
-## Appendix — full route table
+## API Reference
 
-| Method | Path | Matrix operation | Master switch | Purpose |
+Every request needs a bridge API key, sent as `X-Bridge-Key: <key>` (or
+`Authorization: Bearer <key>`). No key → `401`. Key present but not
+permitted for the (model, operation) → `403`.
+
+| Method | Path | Required matrix grant | Master switch | Purpose |
 |---|---|---|---|---|
-| GET | `/models` | `read` on `*` | — | List all models Odoo knows about |
+| GET | `/models` | `read` on `*` | — | List all models the bridge can see |
 | GET | `/models/:model/fields` | `read` on model | — | Field schema (+ access with `?access=1`) |
-| POST | `/models/:model/search` | `read` on model | — | `search_read` |
+| POST | `/models/:model/search` | `read` on model | — | Search/read records |
 | POST | `/models/:model` | `create` on model | `ODOO_ALLOW_WRITE` | Create a record |
 | PATCH | `/models/:model/:id` | `write` on model | `ODOO_ALLOW_WRITE` | Update a record |
 | DELETE | `/models/:model/:id` | `unlink` on model | `ODOO_ALLOW_DELETE` | Delete a record |
 
-Any of the last three accept `?dry_run=1`, gated by the same matrix +
-switch requirements as the real call.
+The last three all accept `?dry_run=1`, gated by the same requirements as
+the real call.
+
+### Examples
+
+```bash
+# Discover what you can see
+curl -s http://127.0.0.1:8088/models?access=1 -H "X-Bridge-Key: $KEY"
+
+# Field schema for a model
+curl -s "http://127.0.0.1:8088/models/crm.lead/fields?access=1" -H "X-Bridge-Key: $KEY"
+
+# Read records
+curl -s -X POST http://127.0.0.1:8088/models/crm.lead/search \
+  -H "X-Bridge-Key: $KEY" -H 'Content-Type: application/json' \
+  -d '{"domain": [["type", "=", "lead"]], "fields": ["name", "partner_name", "stage_id"]}'
+
+# Create, previewed first
+curl -s -X POST "http://127.0.0.1:8088/models/res.partner?dry_run=1" \
+  -H "X-Bridge-Key: $KEY" -H 'Content-Type: application/json' \
+  -d '{"values": {"name": "Example Corp", "email": "hello@example.com"}}'
+
+# Update a record
+curl -s -X PATCH http://127.0.0.1:8088/models/crm.lead/10 \
+  -H "X-Bridge-Key: $KEY" -H 'Content-Type: application/json' \
+  -d '{"values": {"stage_id": 3}}'
+
+# Delete a record
+curl -s -X DELETE http://127.0.0.1:8088/models/res.partner/42 -H "X-Bridge-Key: $KEY"
+```

@@ -1,10 +1,11 @@
 ---
-title: Odoo Bridge Docs
+title: Odoo Bridge
 ---
 
-Documentation for **odoo-cli** — an Odoo JSON-RPC bridge with a per-client
-permission matrix. The code itself is private; these docs are public and
-tracked independently.
+**Odoo Bridge** — a self-hostable JSON-RPC bridge for Odoo with a
+per-client permission matrix, a passphrase-protected admin dashboard, and
+an audit log. Built for use by scripts and by AI agents alike.
 
-- [README](README.md) — setup, architecture, running it (Docker or bare Python), full route reference
-- [MANUAL](MANUAL.md) — the operational manual: for the human operator (dashboard, keys, audit log) *and* for an AI agent using a bridge key (discovery-first workflow, dry-run, error-handling contract)
+- [User Manual](MANUAL.md) — introduction, installation, and how to
+  operate it, for a human operator *and* for an AI agent using a bridge
+  key.
