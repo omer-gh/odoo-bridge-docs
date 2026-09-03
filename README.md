@@ -1,3 +1,7 @@
+---
+title: README
+---
+
 # odoo-bridge
 
 > Setting this up or changing the code? Keep reading. Already running and
