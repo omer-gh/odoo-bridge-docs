@@ -17,10 +17,10 @@ fixed list.
 Access is controlled by three independent layers, in order:
 
 1. **Odoo's own access control.** Every call ultimately runs as one Odoo
-   user (configured once, in `.env`). Odoo enforces that user's groups,
-   record rules, and field-level access server-side, regardless of what
-   the bridge asks for. This is the hard ceiling — nothing below can
-   exceed it.
+   user, configured through the dashboard (see Part A). Odoo enforces that
+   user's groups, record rules, and field-level access server-side,
+   regardless of what the bridge asks for. This is the hard ceiling —
+   nothing below can exceed it.
 2. **A per-client permission matrix**, managed through a
    passphrase-protected dashboard. Each caller of the bridge (each script
    or agent) gets its own API key, scoped to exactly the models and
@@ -69,8 +69,8 @@ To mint the API key:
 1. Log in to Odoo **as that user**.
 2. **Preferences → Account Security → API Keys → New API Key**, give it a
    description, confirm your password.
-3. Copy the key immediately — Odoo shows it once. This is your
-   `ODOO_API_KEY`.
+3. Copy the key immediately — Odoo shows it once. You'll enter it in the
+   dashboard in step 3, not in a config file.
 
 If you don't know your database name, Odoo exposes it:
 
@@ -87,13 +87,16 @@ From the project directory:
 cp .env.example .env
 ```
 
-Fill in:
+Only one thing is required here:
 
-- `ODOO_URL`, `ODOO_DB`, `ODOO_USERNAME`, `ODOO_API_KEY` — from step 1
 - `DASHBOARD_SECRET_KEY` — generate one: `python3 -c "import secrets; print(secrets.token_hex(32))"`
 
-You don't need to set a dashboard passphrase here — the first time you
-open the dashboard, it walks you through choosing one (see Part A).
+Everything else — the dashboard passphrase and the Odoo connection details
+from step 1 — is set up through the dashboard itself after it's running
+(see Part A), not in this file. (You *can* still set `ODOO_URL`/`ODOO_DB`/
+`ODOO_USERNAME`/`ODOO_API_KEY` here if you'd rather pre-seed a
+non-interactive deployment — see the comments in `.env.example` — but it's
+optional either way.)
 
 Leave `ODOO_ALLOW_WRITE=0` and `ODOO_ALLOW_DELETE=0` until you're ready to
 go beyond read-only (see Part A).
@@ -163,6 +166,23 @@ new one. It requires typing a literal confirmation phrase (shown on the
 page) to proceed, and the reset itself is recorded in the audit log even
 though everything else is wiped.
 
+### Configuring the Odoo connection
+
+**Odoo connection** in the nav (or the banner on the clients page, if
+nothing's configured yet) — set the URL, database, username, and API key
+from installation step 1 here. Saving actually authenticates with those
+exact values first: if that fails, nothing is written and the bridge keeps
+using whatever was working before, so a typo can't silently break it.
+
+The API key field is always blank when you open the page (never re-shown
+once saved — only "current key ends in `…xxxx`" for identification) and
+leaving it blank on save keeps the existing key, so you can update just
+the URL or database without having to paste the key in again.
+
+This is stored in the same database as everything else here, not `.env` —
+so it survives container rebuilds and is editable without touching a
+config file or restarting anything.
+
 ### Managing bridge clients (dashboard)
 
 1. Log in with your passphrase.
@@ -205,12 +225,13 @@ export/grep if you need more than the dashboard shows.
 ### Backup / recovery
 
 The only state that isn't reproducible from a fresh install is the stored
-database (clients/keys/matrix **and** the dashboard passphrase itself —
-both live in the same file) and the audit log. Back up that volume
-regularly — losing it means recreating every client, choosing a new
-passphrase, and losing the audit trail, all at once. Also back up `.env`
-separately (your Odoo API key, session-signing secret key) — nothing else
-has a copy of it.
+database — clients/keys/matrix, the dashboard passphrase, and the Odoo
+connection details (including the API key) all live in that one file —
+and the audit log. Back up that volume regularly — losing it means
+recreating every client, choosing a new passphrase, reconfiguring the
+Odoo connection, and losing the audit trail, all at once. Also back up
+`.env` separately (just the session-signing secret key at this point) —
+nothing else has a copy of it.
 
 ### Troubleshooting
 
@@ -221,6 +242,7 @@ has a copy of it.
 | A client gets `401` | Missing/wrong key, or the client was disabled/deleted/rotated in the dashboard |
 | A client gets `403` on a call you expect to work | Check its matrix on the client's dashboard page first; if that looks right, check the relevant master switch in `.env` |
 | Bridge server can't reach Odoo (`502`) | Same reachability check as the autocomplete issue above |
+| "Odoo connection" page rejects settings that look correct | The API key may have been revoked/rotated on the Odoo side since it was last saved here — mint a fresh one (installation step 1) and try again |
 
 ### Changing or resetting the dashboard passphrase
 
