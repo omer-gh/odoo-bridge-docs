@@ -117,3 +117,10 @@ first-time dashboard setup, configuring the Odoo connection, creating and
 scoping bridge clients, turning on writes, reading the audit log, and the
 full HTTP API reference for a script or an AI agent — is in the
 [User Manual](MANUAL.md).
+
+## License
+
+[Apache License 2.0](LICENSE). Provided "AS IS" — no warranty of any
+kind, no liability for the authors. The license text is baked into the
+image itself (`/app/LICENSE`, plus an `org.opencontainers.image.licenses`
+label), not just linked here.

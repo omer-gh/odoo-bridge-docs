@@ -14,3 +14,7 @@ an audit log. Built for use by scripts and by AI agents alike.
 - [Security](SECURITY.md) — the access-control model, network exposure,
   audit log redaction, and history of the 2026-09-04 security review.
 - [Code of Conduct](CODE_OF_CONDUCT.md)
+- [License](LICENSE) — Apache License 2.0. Provided "AS IS", with no
+  warranty of any kind and no liability for the authors — see the license
+  text for the full disclaimer. Also baked into the published Docker
+  image itself, not just this page.
