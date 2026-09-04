@@ -1,0 +1,41 @@
+# Copy-paste starting point for running the published image — no source
+# checkout needed. See INSTALL.md for the full walkthrough.
+#
+#   docker compose up -d
+#
+# Requires a .env file next to this one — copy .env.example to .env and
+# fill in DASHBOARD_SECRET_KEY at minimum.
+
+services:
+  odoo-server:
+    image: ghcr.io/omer-gh/odoo-bridge:latest
+    command: ["server"]
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8088
+      BRIDGE_DB_PATH: /data/bridge.db
+      ODOO_AUDIT_LOG: /data/audit.log
+    ports:
+      - "127.0.0.1:8088:8088"
+    volumes:
+      - bridge-data:/data
+
+  odoo-dashboard:
+    image: ghcr.io/omer-gh/odoo-bridge:latest
+    command: ["dashboard"]
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DASHBOARD_HOST: 0.0.0.0
+      DASHBOARD_PORT: 8090
+      BRIDGE_DB_PATH: /data/bridge.db
+      ODOO_AUDIT_LOG: /data/audit.log
+    ports:
+      - "127.0.0.1:8090:8090"
+    volumes:
+      - bridge-data:/data
+
+volumes:
+  bridge-data:
