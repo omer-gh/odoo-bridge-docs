@@ -6,6 +6,8 @@ title: Odoo Bridge
 per-client permission matrix, a passphrase-protected admin dashboard, and
 an audit log. Built for use by scripts and by AI agents alike.
 
+- [Install](INSTALL.md) — run the prebuilt Docker image, the fast path if
+  you just want it running.
 - [User Manual](MANUAL.md) — introduction, installation, and how to
   operate it, for a human operator *and* for an AI agent using a bridge
   key.

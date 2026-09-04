@@ -51,6 +51,10 @@ users:
 
 ## Installation
 
+> **Just want to run it, not build it?** See [INSTALL.md](INSTALL.md) for
+> the prebuilt Docker image (`ghcr.io/omer-gh/odoo-bridge`) — no source
+> checkout needed. The steps below are for building from source instead.
+
 ### Requirements
 
 - Docker and Docker Compose (recommended), or Python 3.12+ if running the
