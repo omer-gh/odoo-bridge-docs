@@ -33,6 +33,10 @@ Access is controlled by three independent layers, in order:
    matching switch is off — a deliberate second step between "this client
    is allowed to write" and "writes are actually live."
 
+See [SECURITY.md](SECURITY.md) for the full access-control model, network
+exposure guidance, and the history of security fixes applied to this
+tool.
+
 **This manual has two audiences**, because the bridge has two kinds of
 users:
 
