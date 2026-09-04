@@ -118,6 +118,13 @@ client/permission-matrix database and the audit log:
 Both are bound to localhost only by default — nothing is exposed beyond
 the machine running it unless you deliberately change the port bindings.
 
+> **If you ever widen `HOST`/`DASHBOARD_HOST` beyond `127.0.0.1`:** put a
+> TLS-terminating reverse proxy (nginx, Caddy, Traefik — whatever you
+> already run) in front first. Neither the bridge server nor the dashboard
+> implement TLS themselves, so bridge API keys, the dashboard passphrase,
+> and the Odoo API key (sent during the connection-verify step on
+> "Odoo connection") would otherwise cross the network in cleartext.
+
 To stop: `docker compose down` (add `-v` to also delete the stored
 clients/keys/matrix/audit log).
 
@@ -220,7 +227,17 @@ The dashboard's **Audit log** page shows the most recent calls (client,
 method, model, action, status), newest first — every request, allowed or
 refused, dry-run or real, nothing filtered out. The full history is also
 available as a plain append-only log file inside the running server for
-export/grep if you need more than the dashboard shows.
+export/grep if you need more than the dashboard shows. The file rotates
+automatically once it grows past a few megabytes, so it won't grow without
+bound.
+
+By default the full field values of every create/write are logged
+verbatim. If a bridge client might ever write something sensitive (a
+password, a token) that you don't want sitting in plaintext in this log,
+set `AUDIT_REDACT_FIELDS` (comma-separated field names, case-insensitive)
+in `.env` — matching values are replaced with `[REDACTED]` before they're
+logged; the field name still appears, so the trail still shows *that* a
+write happened, just not the value.
 
 ### Backup / recovery
 
